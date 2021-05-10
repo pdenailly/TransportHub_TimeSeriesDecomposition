@@ -34,6 +34,8 @@ dt_Hub = read.csv('Data_Riderships.csv')  %>%#Three columns : 'date', 'station',
         dplyr::select(date,station,ridership)
 
 dt_Hub = rbind(dt_Hub, data.frame("date" = c(as.Date("2016-12-07"),as.Date("2016-12-07")), "station" = c("Metro1","RERA"), "ridership" = c(0,0)))
+dt_Hub = rbind(dt_Hub, data.frame("date" = as.Date(dt_Hub %>% group_by(date) %>% summarise(nb=n()) %>% filter(nb==1) %>% pull(date)),
+                                  "station" = rep("Metro1", 12), 'ridership'=rep(0,12)))
 
 #Exogenous data
 data_calendar = read.csv("calendar.csv")
@@ -199,7 +201,7 @@ for(i in c(-10,-5,0,5,10)){
   
   
   tryCatch({
-    mleMod_rob_mult_tout_rera = dlmMLE(serie_train_gen_log_rera, parm = init, build = Mod_rob_mult_tout_rera, hessian=T, upper = upper_bound, control=list(trace=1,REPORT=1,maxit=1500))
+    mleMod_rob_mult_tout_rera = dlmMLE(serie_train_gen_log_rera, parm = init, build = Mod_rob_mult_tout_rera, hessian=T, upper = upper_bound, control=list(trace=1,REPORT=1,maxit=1))
     fwrite(as.list(mleMod_rob_mult_tout_rera$par), file = paste("mleMod_rob_mult_tout_rera_init",as.character(i),".txt"))
   }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")}
   )      
@@ -249,7 +251,7 @@ for(i in c(-10,-5,0,5,10)){
   
   
   tryCatch({
-    mleMod_rob_mult_tout_m1 = dlmMLE(serie_train_gen_log_m1, parm = init, build = Mod_rob_mult_tout_m1, hessian=T, upper = upper_bound, control=list(trace=1,REPORT=1,maxit=1500))
+    mleMod_rob_mult_tout_m1 = dlmMLE(serie_train_gen_log_m1, parm = init, build = Mod_rob_mult_tout_m1, hessian=T, upper = upper_bound, control=list(trace=1,REPORT=1,maxit=1))
     fwrite(as.list(mleMod_rob_mult_tout_m1$par), file = paste("mleMod_rob_mult_tout_m1_init",as.character(i),".txt"))
   }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")}
   )      
@@ -263,28 +265,30 @@ for(i in c(-10,-5,0,5,10)){
 #Choose best models
 LL_rera = c()
 LL_m1 = c()
-for(i in c(-10,-5,0,5,10)){
-  mod_rera = unlist(as.list(read.table(paste0("mleMod_rob_mult_tout_rera_init",as.character(i))))) 
-  mod_m1 = unlist(as.list(read.table(paste0("mleMod_rob_mult_tout_m1_init",as.character(i)))))  
+for(l in list.files(pattern = 'mleMod_rob_mult_tout_rera_init.+\\.txt',recursive = TRUE) ){
+  mod_rera = unlist(as.list(read.csv(l,header=F))) 
   LL_rera = c(LL_rera, -dlmLL(serie_train_gen_log_rera, Mod_rob_mult_tout_rera(mod_rera)))
+}
+for(l in list.files(pattern = 'mleMod_rob_mult_tout_m1_init.+\\.txt',recursive = TRUE) ){
+  mod_m1 = unlist(as.list(read.csv(l,header=F))) 
   LL_m1 = c(LL_m1, -dlmLL(serie_train_gen_log_m1, Mod_rob_mult_tout_m1(mod_m1)))
 }
 
 
+
 #M1
-i_m1 = (c(-10,-5,0,5,10))[which(LL_m1 == max(LL_m1))]
-mleMod_rob_mult_tout = unlist(as.list(read.table(paste0("mleMod_rob_mult_tout_m1_init",as.charcter(i_m1))))) 
+best_m1 = list.files(pattern = 'mleMod_rob_mult_tout_m1_init.+\\.txt',recursive = TRUE)[which(LL_m1 == max(LL_m1))]
+mleMod_rob_mult_tout = unlist(as.list(read.csv(best_m1,header=F))) 
 mod_built_m1 = Mod_rob_mult_tout_m1(mleMod_rob_mult_tout)
 mod.smoothed_m1 = dlmSmooth(serie_train_gen_log_m1, mod_built_m1)
 
 
 
 #RERA
-i_rera = (c(-10,-5,0,5,10))[which(LL_m1 == max(LL_m1))]
-mleMod_rob_mult_tout = unlist(as.list(read.table(paste0("mleMod_rob_mult_tout_rera_init",as.character(i_rera))))) 
+best_rera = list.files(pattern = 'mleMod_rob_mult_tout_rera_init.+\\.txt',recursive = TRUE)[which(LL_rera == max(LL_rera))]
+mleMod_rob_mult_tout = unlist(as.list(read.csv(best_rera,header=F))) 
 mod_built_rera = Mod_rob_mult_tout_rera(mleMod_rob_mult_tout)
 mod.smoothed_rera = dlmSmooth(serie_train_gen_log_rera, mod_built_rera)
-
 
 
 
@@ -405,27 +409,7 @@ for (t in seq(1,length(serie_train_gen_rera))){
   err_travaux_rera = c(err_travaux_rera,  XFF[24:25] %*% mse.list_smooth_rera[[t]][24:25,24:25] %*% (XFF[24:25]))
   
   
-  
-  
-  #greves ratp
-  j_greves_m1 = c(j_greves_m1, t(mod.smoothed_m1$s[t,26])%*%XFF[26])
-  err_greves_m1 = c(err_greves_m1,  XFF[26] %*% mse.list_smooth_m1[[t]][26,26] %*% (XFF[26]))
-  
-  j_greves_rera = c(j_greves_rera, t(mod.smoothed_rera$s[t,26])%*%XFF[26])
-  err_greves_rera = c(err_greves_rera,  XFF[26] %*% mse.list_smooth_rera[[t]][26,26] %*% (XFF[26]))
-  
-  
-  
-  #confinement
-  j_confinement_m1 = c(j_confinement_m1, t(mod.smoothed_m1$s[t,28:29])%*%XFF[28:29])
-  err_confinement_m1 = c(err_confinement_m1,  XFF[28:29] %*% mse.list_smooth_m1[[t]][28:29,28:29] %*% (XFF[28:29]))
-  
-  j_confinement_rera = c(j_confinement_rera, t(mod.smoothed_rera$s[t,28:29])%*%XFF[28:29])
-  err_confinement_rera = c(err_confinement_rera,  XFF[28:29] %*% mse.list_smooth_rera[[t]][28:29,28:29] %*% (XFF[28:29]))
-  
-  
-  
-  
+
   #jours fériés
   j_ferie_m1 = c(j_ferie_m1, t(mod.smoothed_m1$s[t,21:22])%*%XFF[21:22])
   err_ferie_m1 = c(err_ferie_m1,  XFF[21:22] %*% mse.list_smooth_m1[[t]][21:22,21:22] %*% (XFF[21:22]))
@@ -436,11 +420,11 @@ for (t in seq(1,length(serie_train_gen_rera))){
   
   
   #travaux M1
-  j_travaux_m1_m1 = c(j_travaux_m1_m1, t(mod.smoothed_m1$s[t,30:31])%*%XFF[30:31])
-  err_travaux_m1_m1 = c(err_travaux_m1_m1,  XFF[30:31] %*% mse.list_smooth_m1[[t]][30:31,30:31] %*% (XFF[30:31]))
+  j_travaux_m1_m1 = c(j_travaux_m1_m1, t(mod.smoothed_m1$s[t,27:28])%*%XFF[27:28])
+  err_travaux_m1_m1 = c(err_travaux_m1_m1,  XFF[27:28] %*% mse.list_smooth_m1[[t]][27:28,27:28] %*% (XFF[27:28]))
   
-  j_travaux_m1_rera = c(j_travaux_m1_rera, t(mod.smoothed_rera$s[t,30:31])%*%XFF[30:31])
-  err_travaux_m1_rera = c(err_travaux_m1_rera,  XFF[30:31] %*% mse.list_smooth_rera[[t]][30:31,30:31] %*% (XFF[30:31]))
+  j_travaux_m1_rera = c(j_travaux_m1_rera, t(mod.smoothed_rera$s[t,27:28])%*%XFF[27:28])
+  err_travaux_m1_rera = c(err_travaux_m1_rera,  XFF[27:28] %*% mse.list_smooth_rera[[t]][27:28,27:28] %*% (XFF[27:28]))
 }
 
 
@@ -459,6 +443,8 @@ labeller <- function(variable,value){
   return(labels_names[value])
 }
 
+vacances_semaine = matrix(as.numeric(data_calendar$vacances_semaine))
+vacances_weekend = matrix(as.numeric(data_calendar$vacances_weekend))
 
 
 #M1
@@ -497,11 +483,11 @@ plot1 = ggplot(data.frame(
     mutate(vacs1 = vacances_semaine, vacs2 = vacances_weekend) %>%
     mutate(vacs = vacs1 + vacs2) %>%
     mutate(vacs = factor(vacs)) %>%
-    filter(year(temps)==2012) , 
+    filter(year(temps)==2015) , 
   aes(x=temps, y=mu)) +
   geom_tile( aes(y=0, fill =vacs ), alpha=.4) +
   geom_line(size=1.2) + 
-  geom_rect( aes(xmin = as.Date('2012-05-07')  , xmax = as.Date('2012-06-24'), 
+  geom_rect( aes(xmin = as.Date('2015-05-07')  , xmax = as.Date('2015-06-24'), 
                  ymin = -0.5, ymax = .5),fill=NA, colour = "black", size=0.8) +
   geom_ribbon(aes(ymin=lower, ymax=upper),fill="gray78", alpha=0.7) +
   theme_bw() +
@@ -516,11 +502,11 @@ plot1 = ggplot(data.frame(
   scale_y_continuous(labels=function(x) format(x, big.mark = ".", scientific = FALSE), position = "right")+
   ylab(expression(f[t]) ) +
   scale_fill_brewer('BuGn')  + 
-  geom_text(label="February", x=as.Date(c("2012-02-25")),y=.25,color = "black", size=6,angle = 90) +
-  geom_text(label="Spring", x=as.Date(c("2012-04-22")),y=.25,color = "black", size=6,angle = 90) +
-  geom_text(label="Summer", x=as.Date(c("2012-08-05")),y=.25,color = "black", size=6,angle = 90) +
-  geom_text(label="Toussaint", x=as.Date(c("2012-11-04")),y=.25,color = "black", size=6,angle = 90) +
-  geom_text(label="Christmas", x=as.Date(c("2012-12-22")),y=.3,color = "black", size=6,angle = 90) +
+  geom_text(label="February", x=as.Date(c("2015-02-25")),y=.25,color = "black", size=6,angle = 90) +
+  geom_text(label="Spring", x=as.Date(c("2015-04-22")),y=.25,color = "black", size=6,angle = 90) +
+  geom_text(label="Summer", x=as.Date(c("2015-08-05")),y=.25,color = "black", size=6,angle = 90) +
+  geom_text(label="Toussaint", x=as.Date(c("2015-11-04")),y=.25,color = "black", size=6,angle = 90) +
+  geom_text(label="Christmas", x=as.Date(c("2015-12-22")),y=.3,color = "black", size=6,angle = 90) +
   scale_x_date(date_breaks = "1.5 month", date_labels = c("Jan","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
 
 
@@ -532,7 +518,7 @@ plot2 =  ggplot(data.frame(
   'upper' = c((sem_m1 + qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera + qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'lower' = c((sem_m1 - qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera - qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen)))
-) %>% filter(temps >= '2012-05-07' & temps <= '2012-06-24' & station == 'Metro 1'), aes(x=temps, y=sem,group=station,colour=station)) + 
+) %>% filter(temps >= '2015-05-07' & temps <= '2015-06-24' & station == 'Metro 1'), aes(x=temps, y=sem,group=station,colour=station)) + 
   geom_line(size=1, color="black") +
   ylab(expression(s[t]))+theme_bw() +
   theme( legend.position = "none",legend.direction = "vertical", , strip.text.y = element_text(size=30,face='bold'),
@@ -600,11 +586,11 @@ plot1 = ggplot(data.frame(
     mutate(vacs1 = vacances_semaine, vacs2 = vacances_weekend) %>%
     mutate(vacs = vacs1 + vacs2) %>%
     mutate(vacs = factor(vacs)) %>%
-    filter(year(temps)==2012) , 
+    filter(year(temps)==2015) , 
   aes(x=temps, y=mu)) +
   geom_tile( aes(y=0, fill =vacs ), alpha=.4) +
   geom_line(size=1.2) + 
-  geom_rect( aes(xmin = as.Date('2012-05-07')  , xmax = as.Date('2012-06-24'), 
+  geom_rect( aes(xmin = as.Date('2015-05-07')  , xmax = as.Date('2015-06-24'), 
                  ymin = -0.5, ymax = .5),fill=NA, colour = "black", size=0.8) +
   geom_ribbon(aes(ymin=lower, ymax=upper),fill="gray78", alpha=0.7) +
   theme_bw() +
@@ -619,11 +605,11 @@ plot1 = ggplot(data.frame(
   scale_y_continuous(labels=function(x) format(x, big.mark = ".", scientific = FALSE), position = "right")+
   ylab(expression(f[t]) ) +
   scale_fill_brewer('BuGn')  + 
-  geom_text(label="February", x=as.Date(c("2012-02-25")),y=.25,color = "black", size=6, angle=90) +
-  geom_text(label="Spring", x=as.Date(c("2012-04-22")),y=.25,color = "black", size=6, angle=90) +
-  geom_text(label="Summer", x=as.Date(c("2012-08-05")),y=.25,color = "black", size=6, angle=90) +
-  geom_text(label="Toussaint", x=as.Date(c("2012-11-04")),y=.25,color = "black", size=6, angle=90) +
-  geom_text(label="Christmas", x=as.Date(c("2012-12-25")),y=.3,color = "black", size=6, angle=90) +
+  geom_text(label="February", x=as.Date(c("2015-02-25")),y=.25,color = "black", size=6, angle=90) +
+  geom_text(label="Spring", x=as.Date(c("2015-04-22")),y=.25,color = "black", size=6, angle=90) +
+  geom_text(label="Summer", x=as.Date(c("2015-08-05")),y=.25,color = "black", size=6, angle=90) +
+  geom_text(label="Toussaint", x=as.Date(c("2015-11-04")),y=.25,color = "black", size=6, angle=90) +
+  geom_text(label="Christmas", x=as.Date(c("2015-12-25")),y=.3,color = "black", size=6, angle=90) +
   scale_x_date(date_breaks = "1.5 month", date_labels = c("Jan","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
 
 
@@ -634,7 +620,7 @@ plot2 =  ggplot(data.frame(
   'upper' = c((sem_m1 + qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera + qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'lower' = c((sem_m1 - qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera - qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen)))
-) %>% filter(temps >= '2012-05-07' & temps <= '2012-06-24' & station == 'RER A'), aes(x=temps, y=sem,group=station,colour=station)) + 
+) %>% filter(temps >= '2015-05-07' & temps <= '2015-06-24' & station == 'RER A'), aes(x=temps, y=sem,group=station,colour=station)) + 
   geom_line(size=1, color="black") +
   ylab(expression(s[t]))+theme_bw() +
   theme( legend.position = "none",legend.direction = "vertical", , strip.text.y = element_text(size=30,face='bold'),
@@ -673,7 +659,7 @@ ggplot(data.frame(
   'upper' = c((sem_m1 + qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera + qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'lower' = c((sem_m1 - qnorm(0.025, lower=F) * sqrt(err_sem_m1)), (sem_rera - qnorm(0.025, lower=F) * sqrt(err_sem_rera))),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen)))
-) %>% filter(temps >= as.Date('2019-01-07') & temps < as.Date('2019-01-14')), aes(x=temps, y=sem,group=station,colour=station)) + geom_line(size=1.6) +
+) %>% filter(temps >= as.Date('2015-01-05') & temps < as.Date('2015-01-12')), aes(x=temps, y=sem,group=station,colour=station)) + geom_line(size=1.6) +
   ylab(expression(s[1][','][t])) + theme_bw() +
   geom_errorbar(aes(ymin= lower, ymax=upper, colour=station), width=.1,size=1)+ 
   theme( legend.direction = "horizontal",
@@ -684,7 +670,7 @@ ggplot(data.frame(
          axis.title=element_text(size=30,face="bold"), axis.text = element_text(size=15),axis.text.x = element_text(angle = 50, vjust = 0.5),
          legend.text = element_text(size = 30,face='bold'),legend.key.width=unit(4, "cm"),legend.key.height=unit(1, "cm"),panel.grid.major =  element_line(size=1.8),
          panel.grid.minor =  element_line(size=1.8), axis.ticks.x=element_blank()) +
-  scale_x_date(breaks = seq(as.Date("2019-01-07"), as.Date("2019-01-13"), by="1 day"),
+  scale_x_date(breaks = seq(as.Date("2015-01-05"), as.Date("2015-01-11"), by="1 day"),
                labels= c('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')) +
   scale_colour_brewer(name = "", labels = c("Metro 1", "RER A"),palette = 'Accent') + 
   xlab('')
@@ -699,7 +685,7 @@ ggplot(data.frame(
   'upper' = c(j_travaux_m1 + qnorm(0.025, lower=F) * sqrt(err_travaux_m1), j_travaux_rera + qnorm(0.025, lower=F) * sqrt(err_travaux_rera)),
   'lower' = c(j_travaux_m1 - qnorm(0.025, lower=F) * sqrt(err_travaux_m1), j_travaux_rera - qnorm(0.025, lower=F) * sqrt(err_travaux_rera)),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen))),
-  'ferie'=c(ferie)
+  'ferie'=c(bank_workday+bank_weekend,bank_workday+bank_weekend)
 ) %>% filter(month(temps) %in% c(7,8) & year(temps) >= 2015 ) %>% mutate(wday=wday(temps)) %>% mutate(non_work = ifelse(wday %in% c(1,7) | ferie == 1, T,F)) %>%
   mutate(groupe = ifelse(year(temps) %in% c(2015,2016,2017), 'First', 'Second')) %>% 
   filter( (temps > '2015-07-20' & temps < '2015-09-01') | (temps > '2016-07-20' & temps < '2016-09-01') | (temps > '2017-07-20' & temps < '2017-09-01') |
@@ -736,7 +722,7 @@ ggplot(data.frame(
   'upper' = c(j_travaux_m1 + qnorm(0.025, lower=F) * sqrt(err_travaux_m1), j_travaux_rera + qnorm(0.025, lower=F) * sqrt(err_travaux_rera)),
   'lower' = c(j_travaux_m1 - qnorm(0.025, lower=F) * sqrt(err_travaux_m1), j_travaux_rera - qnorm(0.025, lower=F) * sqrt(err_travaux_rera)),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen))),
-  'ferie'=c(ferie)
+  'ferie'=c(bank_workday+bank_weekend,bank_workday+bank_weekend)
 ) %>% filter(month(temps) %in% c(7,8) & year(temps) >= 2015 ) %>% mutate(wday=wday(temps)) %>% mutate(non_work = ifelse(wday %in% c(1,7) | ferie == 1, T,F)) %>%
   mutate(groupe = ifelse(year(temps) %in% c(2015,2016,2017), 'First', 'Second')) %>% 
   filter( (temps > '2015-07-20' & temps < '2015-09-01') | (temps > '2016-07-20' & temps < '2016-09-01') | (temps > '2017-07-20' & temps < '2017-09-01') |
@@ -777,7 +763,7 @@ ggplot(data.frame(
   'upper' = c(j_travaux_m1_m1 + qnorm(0.025, lower=F) * sqrt(err_travaux_m1_m1), j_travaux_m1_rera + qnorm(0.025, lower=F) * sqrt(err_travaux_m1_rera)),
   'lower' = c(j_travaux_m1_m1 - qnorm(0.025, lower=F) * sqrt(err_travaux_m1_m1), j_travaux_m1_rera - qnorm(0.025, lower=F) * sqrt(err_travaux_m1_rera)),
   'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen))),
-  'ferie'=c(ferie,ferie)
+  'ferie'=c(bank_workday+bank_weekend,bank_workday+bank_weekend)
 ) %>% filter((temps > '2014-08-12' & temps < '2014-08-22') | (temps > '2016-07-10' & temps < '2016-07-21') | 
                (temps > '2017-05-01' & temps < '2017-05-12')  | 
                (temps > '2018-05-01' & temps < '2018-05-13')) %>% mutate(wday=wday(temps)) %>% mutate(non_work = ifelse(wday %in% c(1,7) | ferie == 1, T,F)),
@@ -800,141 +786,5 @@ aes(x=temps, y=travaux, group = station)) +
   scale_colour_brewer(name = "", labels = c("Working days", "Non working days"),palette = 'Set1') + 
   geom_point(shape=20,size=5,aes( colour=non_work)) +
   guides(color = guide_legend(override.aes = list(size = 10)))
-
-
-
-
-
-#plot jours greves
-
-zz = data.frame(
-  'temps' = c(temps_tot_gen, temps_tot_gen),
-  'greves' = c(j_greves_m1, j_greves_rera),
-  'upper' = c(j_greves_m1 + qnorm(0.025, lower=F) * sqrt(err_greves_m1), j_greves_rera + qnorm(0.025, lower=F) * sqrt(err_greves_rera)),
-  'lower' = c(j_greves_m1 - qnorm(0.025, lower=F) * sqrt(err_greves_m1), j_greves_rera - qnorm(0.025, lower=F) * sqrt(err_greves_rera)),
-  'ferie'=c(ferie,ferie),
-  'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen))),
-  'from' = as.Date("2019-12-23"),
-  'to' = as.Date("2020-01-03")
-) %>% filter(temps >= '2019-12-01' & temps < '2020-01-20') %>% mutate(wday=wday(temps)) %>%
-  mutate(non_work = ifelse(wday %in% c(1,7) | ferie == 1, T,F)) %>%
-  mutate(sundays = ifelse(temps %in% c(as.Date("2019-12-08"), as.Date("2019-12-15") ), "Yes","No"))
-
-ggplot(zz, 
-       aes(x=temps, y=greves, group = station)) + 
-  annotate(geom = "rect", xmin =as.Date("2019-12-23"), xmax = as.Date("2020-01-03"),ymin=-Inf,ymax=Inf,
-           fill = "#a6bddb", alpha = 0.4) +
-  geom_line(size=1.2) + 
-  geom_ribbon(aes(ymin=lower, ymax=upper, fill = station), alpha=0.7) +
-  ylab(expression(beta[t]^{(scriptscriptstyle('Strike days') )}*X[t]^{(scriptscriptstyle('Strike days'))})) +
-  geom_point(shape=20,size=5,aes( colour=non_work))  + theme_bw() +
-  theme( legend.direction = "horizontal",
-         legend.box = "vertical", strip.text.y = element_text(size=25,face='bold'),
-         legend.justification = c(0, 1),
-         legend.position="top",
-         legend.title=element_text(size=30, face='bold'),
-         axis.title=element_text(size=30,face="bold"), axis.text.y = element_text(size=30),axis.text.x = element_text(angle=60,size=25, vjust = 0.5), strip.text.x = element_text(size=30),
-         legend.text = element_text(size = 25,face='bold'),legend.key.width=unit(4, "cm"),legend.key.height=unit(1, "cm")) + xlab('Date') +
-  scale_x_date(labels = date_format("%d-%m"))  +
-  scale_colour_brewer(name = "", labels = c("Working days", "Non working days"),palette = 'Set1') + 
-  scale_fill_manual(values = c("RER A"="gray78","Metro 1"="gray78")) + 
-  scale_shape_manual(values = c("Yes"=4,"No"=43)) + 
-  scale_alpha_manual(values = c("RER A"=0,"Metro 1"=1)) +
-  scale_size_manual(values = c("RER A"=0,"Metro 1"=6)) +
-  facet_grid(factor(station,levels=c('RER A','Metro 1'))~.,scale='free')+
-  guides(fill = FALSE, alpha=FALSE, size=FALSE,shape=FALSE) +
-  geom_text(aes(alpha=station, size=station),
-            label="Christmas holidays", 
-            x=as.Date(c("2019-12-28")),
-            y=-.5,
-            color = "black"
-  ) +
-  geom_segment(aes(x=as.Date("2019-12-05"), xend=as.Date("2019-12-05"), y =Inf, yend=-Inf), size=1.1, colour='red2', linetype="dotdash",alpha=0.5) +
-  geom_text(aes(alpha=station, size=station),
-            label="Start of strike", 
-            x=as.Date(c("2019-12-02")),
-            y=.7,
-            color = "red3"
-  ) +
-  geom_point(data=zz %>% filter(sundays=="Yes"),
-             pch=21, fill=NA, size=9, colour="red", stroke=1) +
-  guides(color = guide_legend(override.aes = list(size = 10)))
-
-
-
-
-
-
-
-
-
-
-
-
-#plot confinement/deconfinement
-
-zz = data.frame(
-  'temps' = c(temps_tot_gen,temps_tot_gen),
-  'confinement' = c(j_confinement_m1,j_confinement_rera),
-  'upper' = c(j_confinement_m1 + qnorm(0.025, lower=F) * sqrt(err_confinement_m1), j_confinement_rera + qnorm(0.025, lower=F) * sqrt(err_confinement_rera)  ),
-  'lower' = c(j_confinement_m1 - qnorm(0.025, lower=F) * sqrt(err_confinement_m1), j_confinement_rera - qnorm(0.025, lower=F) * sqrt(err_confinement_rera)),
-  'ferie'=c(ferie,ferie),
-  'station'= c(rep('Metro 1', length(temps_tot_gen)), rep('RER A', length(temps_tot_gen))),
-  'from' = as.Date("2020-07-06"),
-  'to' = as.Date("2020-07-31")
-) %>% filter(temps > '2020-03-10') %>% mutate(wday=wday(temps)) %>% mutate(non_work = ifelse(wday %in% c(1,7) | ferie == 1, T,F)) %>% mutate(period = ifelse(temps >= as.Date('2020-05-11'), 'deconfinement','confinement')) %>%
-  mutate(travaux = ifelse(temps %in% c(as.Date("2020-07-11"),as.Date("2020-07-12"),
-                                       as.Date("2020-07-18"),as.Date("2020-07-19"),
-                                       as.Date("2020-07-25"),as.Date("2020-07-26")
-  ), 'travaux','non'))
-
-
-
-
-ggplot(zz, aes(x=temps, y=confinement, group=station))+ 
-  annotate(geom = "rect", xmin = as.Date("2020-07-06"), xmax = as.Date("2020-07-31"),ymin=-Inf,ymax=Inf,
-           fill = "#a6bddb", alpha = 0.4) +
-  geom_line(size=1.6) + geom_ribbon(aes(ymin=lower, ymax=upper,fill=station), alpha=0.7) + 
-  geom_point(aes(x=temps,y=confinement,color=non_work, size=period, alpha = period),shape=20) +
-  ylab(expression(sum(beta[t]^{(s )}*X[t]^{(s)}, s %in% {(scriptscriptstyle('Lockdown, Post-lockdown'))},))) + theme_bw() +
-  theme( legend.direction = "horizontal",
-         legend.position="top",
-         legend.box = "vertical", strip.text.y = element_text(size=25,face='bold'),
-         legend.justification = c(0, 1),
-         legend.title=element_text(size=30, face='bold'),
-         axis.title=element_text(size=30,face="bold"), axis.text.y = element_text(size=30),axis.text.x = element_text(angle=60,size=25, vjust = 0.5), strip.text.x = element_text(size=30),
-         legend.text = element_text(size = 25,face='bold'),legend.key.width=unit(4, "cm"),legend.key.height=unit(1, "cm")) + xlab('Time') +
-  scale_x_date(labels = date_format("%m-%Y"))  +
-  scale_colour_brewer(name = "", labels = c("Working days", "Non working days"),palette = 'Set1') + 
-  scale_size_manual(values=c(0,5)) +
-  scale_alpha_manual(values=c(0,1)) +
-  geom_segment(aes(x = as.Date(c("2020-05-11")), y = -1, xend = as.Date(c("2020-05-11")), yend = -2), arrow = arrow(length = unit(0.9, "cm")), size=2) + 
-  geom_text(
-    label="Start post-lockdown", 
-    x=as.Date(c("2020-05-11")),
-    y=-.5,
-    color = "black", size=6
-  ) +
-  scale_fill_manual(values = c("RER A"="gray78","Metro 1"="gray78")) + facet_grid(factor(station,levels=c('RER A','Metro 1'))~.)+
-  xlab('Date') +
-  guides(fill = FALSE,size=FALSE,alpha=FALSE,colour = guide_legend(override.aes = list(size=5))) +
-  geom_text(size = 6,
-            label="Summer holidays", 
-            x=as.Date(c("2020-07-18")),
-            y=-3,
-            color = "black"
-  ) +
-  geom_segment(aes(x = as.Date(c("2020-04-11")), y = -1.5, xend = as.Date(c("2020-03-19")), yend = -2.7), arrow = arrow(length = unit(0.9, "cm")), size=2) + 
-  geom_text(
-    label="Start lockdown", 
-    x=as.Date(c("2020-04-11")),
-    y=-1.2,
-    color = "black", size=6
-  ) +
-  geom_point(data=zz %>% filter(travaux=="travaux"),
-             pch=21, fill=NA, size=6, colour="darkblue", stroke=1)+
-  guides(color = guide_legend(override.aes = list(size = 10)))
-
-
 
 
